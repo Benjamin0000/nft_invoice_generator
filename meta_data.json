@@ -1,0 +1,10 @@
+{
+  "name": "Bridge Invoice #001",
+  "description": "Swap invoice on Hedera",
+  "image": "ipfs://QmImageCID123",
+  "attributes": [
+    { "trait_type": "fromToken", "value": "USDT" },
+    { "trait_type": "toToken", "value": "HBAR" },
+    { "trait_type": "amount", "value": "100" }
+  ]
+}
