@@ -181,6 +181,8 @@ function makeOverlaySVG({
   </svg>`;
 }
 
+
+
 app.post("/mint", async (req, res) => {
   try {
     const {
@@ -258,24 +260,56 @@ app.post("/mint", async (req, res) => {
     const metadataURI = await uploadToPinata_JSON(metadata);
 
     /* -----------------------------
-       Mint NFT to user
+      Mint NFT (goes to treasury)
     ----------------------------- */
     const metadataBuffer = Buffer.from(metadataURI);
+
     const mintTx = await new TokenMintTransaction()
       .setTokenId(NFT_TOKEN_ID)
       .setMetadata([metadataBuffer])
       .setMaxTransactionFee(new Hbar(2))
       .execute(HEDERA_CLIENT);
 
-    const receipt = await mintTx.getReceipt(HEDERA_CLIENT);
-    const serials = receipt.serials;
+    const mintReceipt = await mintTx.getReceipt(HEDERA_CLIENT);
+    const serials = mintReceipt.serials;
 
+    if (!serials || serials.length === 0) {
+      return res.status(500).json({ error: "Minting failed — no serial returned" });
+    }
+
+    const serial = serials[0]; // minted NFT serial
+
+/* -----------------------------
+   Transfer NFT to the user
+----------------------------- */
+    const treasuryId = AccountId.fromString(process.env.HEDERA_OPERATOR_ID);
+    const treasuryKey = PrivateKey.fromStringECDSA(process.env.HEDERA_OPERATOR_KEY);
+    const userId = AccountId.fromString(userAccountId);
+
+    const transferTx = await new TransferTransaction()
+      .addNftTransfer(NFT_TOKEN_ID, serial, treasuryId, userId)
+      .freezeWith(HEDERA_CLIENT)
+      .sign(treasuryKey);
+
+    const transferSubmit = await transferTx.execute(HEDERA_CLIENT);
+    const transferReceipt = await transferSubmit.getReceipt(HEDERA_CLIENT);
+
+    if (transferReceipt.status.toString() !== "SUCCESS") {
+      return res.status(500).json({
+        error: "NFT minted but transfer failed",
+        status: transferReceipt.status.toString()
+      });
+    }
+    /* -----------------------------
+      Response
+    ----------------------------- */
     return res.json({
       success: true,
       tokenId: NFT_TOKEN_ID.toString(),
-      serials,
+      serial,
       metadataURI,
-      mintedTo: userAccountId
+      mintedTo: userAccountId,
+      transferStatus: transferReceipt.status.toString()
     });
 
   } catch (err) {
@@ -283,8 +317,6 @@ app.post("/mint", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-
 
 /* ======================================================
    START SERVER
