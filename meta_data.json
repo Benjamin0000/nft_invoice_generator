@@ -1,6 +1,6 @@
 {
   "name": "Bridge Invoice #001",
-  "description": "Swap invoice on Hedera",
+  "description": "Bridge invoice on Hedera",
   "image": "ipfs://QmImageCID123",
   "attributes": [
     { "trait_type": "fromToken", "value": "USDT" },

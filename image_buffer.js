@@ -1,15 +1,136 @@
+import express from "express";
 import fs from "fs/promises";
+import FS from "fs";
+import path from "path";
 import sharp from "sharp";
-import FS from 'fs';
-import path from 'path';
+import bodyParser from "body-parser";
+import FormData from "form-data";
+import axios from "axios";
+import dotenv from "dotenv";
 
-/** ========== 1) IMAGE GENERATION ========== */
-/**
- * Create the SVG overlay using provided dynamic data.
- * Coordinates are tuned for a 1414x2000 base template (from your sample).
- */
+import {
+  Client,
+  TokenMintTransaction,
+  TokenId,
+  PrivateKey,
+  Hbar,
+  AccountId
+} from "@hashgraph/sdk";
+dotenv.config('./env'); 
+
+/* ==============================================
+   CONFIG
+================================================ */
+const PINATA_JWT = process.env.PINATA_JWT;
+const HEDERA_CLIENT = Client.forMainnet();
+
+HEDERA_CLIENT.setOperator(
+  AccountId.fromString(process.env.HEDERA_OPERATOR_ID),
+  PrivateKey.fromStringECDSA(process.env.HEDERA_OPERATOR_KEY)
+);
+
+// Your NFT token ID and supply key
+const NFT_TOKEN_ID = TokenId.fromString('0.0.10119645');
+const SUPPLY_KEY = PrivateKey.fromStringECDSA(process.env.HEDERA_OPERATOR_KEY);
+
+
+
+const TOKEN_LOGO = {
+  ETH: "./assets/eth_logo.png",
+  WETH: "./assets/eth_logo.png",
+  BNB: "./assets/bnb_logo.png",
+  HBAR: "./assets/hbar_logo.png",
+  PACK: "./assets/pack_logo.png",
+  SAUCE: "./assets/sauce_logo.png",
+  USDC: "./assets/usdc_logo.png",
+  USDT: "./assets/usdt_logo.png",
+  WBTC: "./assets/btc_logo.png",
+  BTCB: "./assets/btc_logo.png"
+};
+
+const NETWORK_LOGO = {
+  hedera: TOKEN_LOGO["HBAR"],
+  ethereum: TOKEN_LOGO["ETH"],
+  binance: TOKEN_LOGO["BNB"],
+  arbitrum: "./assets/arbitrum_logo.png",
+  base: "./assets/base_logo.png",
+  optimism: "./assets/optimism_logo.png"
+};
+
+function toBase64DataURI(filePath) {
+  const imageBuffer = FS.readFileSync(filePath);
+  return `data:image/png;base64,${imageBuffer.toString("base64")}`;
+}
+
+/* ======================================================
+   PINATA HELPERS
+====================================================== */
+
+/** Upload a file buffer to Pinata */
+async function uploadToPinata_File(buffer, fileName) {
+  const form = new FormData();
+  form.append("file", buffer, fileName);
+
+  const res = await axios.post(
+    "https://api.pinata.cloud/pinning/pinFileToIPFS",
+    form,
+    {
+      maxBodyLength: Infinity,
+      headers: {
+        Authorization: `Bearer ${PINATA_JWT}`,
+        ...form.getHeaders()
+      }
+    }
+  );
+
+  return `ipfs://${res.data.IpfsHash}`;
+}
+
+/** Upload a JSON object to Pinata */
+async function uploadToPinata_JSON(data) {
+  const res = await axios.post(
+    "https://api.pinata.cloud/pinning/pinJSONToIPFS",
+    data,
+    {
+      headers: {
+        Authorization: `Bearer ${PINATA_JWT}`,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+
+  return `ipfs://${res.data.IpfsHash}`;
+}
+
+
+/* ======================================================
+   GENERATE INVOICE IMAGE
+====================================================== */
+
+async function composeInvoiceImage({ templatePath, overlaySvg }) {
+  const templateBuffer = await fs.readFile(templatePath);
+
+  return await sharp(templateBuffer)
+    .composite([{ input: Buffer.from(overlaySvg), top: 0, left: 0 }])
+    .png({ quality: 90 })
+    .toBuffer();
+}
+
+
+/* ======================================================
+   EXPRESS SETUP
+====================================================== */
+
+const app = express();
+app.use(bodyParser.json({ limit: "30mb" }));
+const PORT = process.env.PORT || 7000;
+
+
+/* ======================================================
+   SVG OVERLAY
+====================================================== */
+
 function makeOverlaySVG({
-  // logos are embedded as base64 data URIs
   fromTokenLogoDataURI,
   fromNetworkLogoDataURI,
   toTokenLogoDataURI,
@@ -22,121 +143,266 @@ function makeOverlaySVG({
   bigAmountText,
   sessionId
 }) {
-  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const esc = (s) =>
+    String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
-  // We'll place elements at coordinates extracted earlier.
   return `
   <svg xmlns="http://www.w3.org/2000/svg" width="1414" height="2000">
     <style>
-      .title { font-family: "Inter", sans-serif; font-size: 48px; font-weight:700; fill:#000; }
       .body { font-family: "Inter", sans-serif; font-size: 28px; fill:#111; }
-      .mono { font-family: "monospace", monospace; font-size:22px; fill:#111; }
-      .big { font-family: "Inter", sans-serif; font-size:160px; font-weight:700; fill:#111; text-shadow: 2px 4px 6px rgba(0,0,0,0.25); }
+      .mono { font-family: monospace; font-size:22px; fill:#111; }
+      .big { font-family: "Inter", sans-serif; font-size:120px; font-weight:700; fill:#111; }
     </style>
 
-    <!-- Token logos -->
-    <!-- From token -->
-    <image href="${fromTokenLogoDataURI}" x="210" y="420" width="120" height="120" />
-    <!-- From network small subscript -->
-    <image href="${fromNetworkLogoDataURI}" x="295" y="205" width="40" height="40" />
+    <image href="${fromTokenLogoDataURI}" x="210" y="420" width="100" height="100" />
+    <image href="${fromNetworkLogoDataURI}" x="265" y="470" width="50" height="50" />
 
-    <!-- To token -->
-    <image href="${toTokenLogoDataURI}" x="915" y="220" width="120" height="120" />
-    <!-- To network small subscript -->
-    <image href="${toNetworkLogoDataURI}" x="1000" y="805" width="40" height="40" />
+    <image href="${toTokenLogoDataURI}" x="770" y="430" width="100" height="100" />
+    <image href="${toNetworkLogoDataURI}" x="840" y="485" width="50" height="50" />
 
-    <!-- Amount labels -->
-    <text x="380" y="760" class="body">${esc(fromAmountText)}</text>
-    <text x="980" y="760" class="body">${esc(toAmountText)}</text>
+    <text x="320" y="480" class="body">From 
+      <tspan style="font-weight:bold">${esc(fromAmountText)}</tspan>
+    </text>
 
-    <!-- Timestamps -->
-    <text x="310" y="920" class="body">${esc(timestampLeft)}</text>
-    <text x="915" y="920" class="body">${esc(timestampRight)}</text>
+    <text x="880" y="480" class="body">To 
+      <tspan style="font-weight:bold">${esc(toAmountText)}</tspan>
+    </text>
 
-    <!-- Transaction hash (wrap) -->
-    <foreignObject x="110" y="280" width="280" height="160">
-      <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Inter, sans-serif; font-size:20px; color:#111; line-height:1.2; word-break:break-all;">
-        ${esc(transactionHash)}
-      </div>
-    </foreignObject>
+    <text x="240" y="650" class="body">${esc(timestampLeft)}</text>
+    <text x="905" y="650" class="body">${esc(timestampRight)}</text>
 
-    <!-- Big amount -->
-    <text x="200" y="1320" class="big">${esc(bigAmountText)}</text>
+    <text x="235" y="760" class="mono" style="font-weight:500">
+      ${esc(transactionHash)}
+    </text>
 
-    <!-- Session ID -->
+    <text x="310" y="1320" class="big">${esc(bigAmountText)}</text>
+
     <text x="530" y="1400" class="body">Session ID ${esc(sessionId)}</text>
-  </svg>
-  `;
-}  
-
-
-/**
- * Compose overlay svg over template into final PNG buffer
- */
-export async function composeInvoiceImage({templatePath, overlaySvg, outputPath = null}) {
-  const templateBuffer = await fs.readFile(templatePath);
-  const composed = await sharp(templateBuffer)
-    .composite([{ input: Buffer.from(overlaySvg), top: 0, left: 0 }])
-    .png({ quality: 90 })
-    .toBuffer();
-
-  if (outputPath) await fs.writeFile(outputPath, composed);
-  return composed;
-}
-  
-  
-  
-// 1) Build overlay svg
-// const overlaySvg = makeOverlaySVG({
-//     fromTokenLogoDataURI,
-//     fromNetworkLogoDataURI,
-//     toTokenLogoDataURI,
-//     toNetworkLogoDataURI,
-//     fromAmountText,
-//     toAmountText,
-//     timestampLeft,
-//     timestampRight,
-//     transactionHash,
-//     bigAmountText,
-//     sessionId
-// });
-
-
-
-
-
-
-// Helper function to convert a PNG file to a Base64 data URI
-function toBase64DataURI(filePath) {
-  const imageBuffer = FS.readFileSync(filePath);
-  return `data:image/png;base64,${imageBuffer.toString('base64')}`;
+  </svg>`;
 }
 
-// Convert all images to Base64
-const fromTokenLogoDataURI = toBase64DataURI('./tether-usdt-logo.png');
-const fromNetworkLogoDataURI = toBase64DataURI('./ethereum_logo.png');
-const toTokenLogoDataURI = toBase64DataURI('./sauce.png');
-const toNetworkLogoDataURI = toBase64DataURI('./hedera.png');
 
-// Generate the SVG overlay with Base64 images
-const overlaySvg = makeOverlaySVG({
-    fromTokenLogoDataURI,
-    fromNetworkLogoDataURI,
-    toTokenLogoDataURI,
-    toNetworkLogoDataURI,
-    fromAmountText: 'From 100 USDT',
-    toAmountText: 'To Amount 100 SAUCE',
-    timestampLeft: '13 Nov 2025, 12:04',
-    timestampRight: '13 Nov 2025, 12:04',
-    transactionHash: '3wrcowtpMo7ZqvmLzqxgkBZ2zvpDFZeJn8S9yLHRkao3LsATQgePiPSV6HxPbNi4X8sjyBwtE179xLSqBymThzn',
-    bigAmountText: '1,012.01 USDT',
-    sessionId: 'HKA00000000000001'
+/* ======================================================
+   MAIN ROUTE
+====================================================== */
+
+app.post("/generate", async (req, res) => {
+  try {
+    const {
+      fromToken,
+      fromNetwork,
+      toToken,
+      toNetwork,
+      fromAmountText,
+      toAmountText,
+      timestampLeft,
+      timestampRight,
+      transactionHash,
+      bigAmountText,
+      sessionId
+    } = req.body;
+
+    /* Validate */
+    if (!TOKEN_LOGO[fromToken])
+      return res.status(400).json({ error: `Invalid fromToken: ${fromToken}` });
+
+    if (!TOKEN_LOGO[toToken])
+      return res.status(400).json({ error: `Invalid toToken: ${toToken}` });
+
+    if (!NETWORK_LOGO[fromNetwork])
+      return res.status(400).json({ error: `Invalid fromNetwork: ${fromNetwork}` });
+
+    if (!NETWORK_LOGO[toNetwork])
+      return res.status(400).json({ error: `Invalid toNetwork: ${toNetwork}` });
+
+    /* Base64 logos */
+    const fromTokenLogoDataURI = toBase64DataURI(TOKEN_LOGO[fromToken]);
+    const fromNetworkLogoDataURI = toBase64DataURI(NETWORK_LOGO[fromNetwork]);
+    const toTokenLogoDataURI = toBase64DataURI(TOKEN_LOGO[toToken]);
+    const toNetworkLogoDataURI = toBase64DataURI(NETWORK_LOGO[toNetwork]);
+
+    /* Render PNG */
+    const overlaySvg = makeOverlaySVG({
+      fromTokenLogoDataURI,
+      fromNetworkLogoDataURI,
+      toTokenLogoDataURI,
+      toNetworkLogoDataURI,
+      fromAmountText,
+      toAmountText,
+      timestampLeft,
+      timestampRight,
+      transactionHash,
+      bigAmountText,
+      sessionId
+    });
+
+    const templatePath = path.join(process.cwd(), "overlay.PNG");
+
+    const finalBuffer = await composeInvoiceImage({
+      templatePath,
+      overlaySvg
+    });
+
+    /* ======================================================
+        Upload image to Pinata
+    ======================================================= */
+    const imageURI = await uploadToPinata_File(
+      finalBuffer,
+      `invoice-${sessionId}.png`
+    );
+
+    console.log("Uploaded Image:", imageURI);
+
+    /* ======================================================
+        Create metadata JSON
+    ======================================================= */
+    const metadata = {
+      name: `Kivon Invoice - ${sessionId}`,
+      description: `Bridged ${fromAmountText} to ${toAmountText}`,
+      image: imageURI,
+      attributes: [
+        { trait_type: "From Amount", value: fromAmountText },
+        { trait_type: "To Amount", value: toAmountText },
+        { trait_type: "From Network", value: fromNetwork },
+        { trait_type: "To Network", value: toNetwork },
+        { trait_type: "Transaction Hash", value: transactionHash },
+        { trait_type: "Session ID", value: sessionId },
+        { trait_type: "Timestamp Left", value: timestampLeft },
+        { trait_type: "Timestamp Right", value: timestampRight }
+      ]
+    };
+
+    /* ======================================================
+        Upload metadata JSON to Pinata
+    ======================================================= */
+    const metadataURI = await uploadToPinata_JSON(metadata);
+
+    console.log("Uploaded Metadata:", metadataURI);
+
+    /* ======================================================
+        Return response
+    ======================================================= */
+    return res.json({
+      success: true,
+      imageURI,
+      metadataURI
+    });
+
+  } catch (err) {
+    console.error("Error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Compose final image
-const finalBuffer = await composeInvoiceImage({
-    templatePath: './overlay.PNG',
-    overlaySvg,
-    outputPath: './prod/new_image.png'
+
+app.post("/mint", async (req, res) => {
+  try {
+    const {
+      userAccountId,
+      fromToken,
+      fromNetwork,
+      toToken,
+      toNetwork,
+      fromAmountText,
+      toAmountText,
+      timestampLeft,
+      timestampRight,
+      transactionHash,
+      bigAmountText,
+      sessionId
+    } = req.body;
+
+    if (!userAccountId) return res.status(400).json({ error: "userAccountId required" });
+
+    /* -----------------------------
+       Validate tokens and networks
+    ----------------------------- */
+    if (!TOKEN_LOGO[fromToken] || !TOKEN_LOGO[toToken] ||
+        !NETWORK_LOGO[fromNetwork] || !NETWORK_LOGO[toNetwork]) {
+      return res.status(400).json({ error: "Invalid token or network" });
+    }
+
+    /* -----------------------------
+       Base64 logos
+    ----------------------------- */
+    const fromTokenLogoDataURI = toBase64DataURI(TOKEN_LOGO[fromToken]);
+    const fromNetworkLogoDataURI = toBase64DataURI(NETWORK_LOGO[fromNetwork]);
+    const toTokenLogoDataURI = toBase64DataURI(TOKEN_LOGO[toToken]);
+    const toNetworkLogoDataURI = toBase64DataURI(NETWORK_LOGO[toNetwork]);
+
+    /* -----------------------------
+       Render PNG
+    ----------------------------- */
+    const overlaySvg = makeOverlaySVG({
+      fromTokenLogoDataURI,
+      fromNetworkLogoDataURI,
+      toTokenLogoDataURI,
+      toNetworkLogoDataURI,
+      fromAmountText,
+      toAmountText,
+      timestampLeft,
+      timestampRight,
+      transactionHash,
+      bigAmountText,
+      sessionId
+    });
+
+    const templatePath = path.join(process.cwd(), "overlay.PNG");
+    const finalBuffer = await composeInvoiceImage({ templatePath, overlaySvg });
+
+    /* -----------------------------
+       Upload image & metadata to Pinata
+    ----------------------------- */
+    const imageURI = await uploadToPinata_File(finalBuffer, `invoice-${sessionId}.png`);
+    const metadata = {
+      name: `Kivon Invoice - ${sessionId}`,
+      description: `Bridged ${fromAmountText} to ${toAmountText}`,
+      image: imageURI,
+      attributes: [
+        { trait_type: "From Amount", value: fromAmountText },
+        { trait_type: "To Amount", value: toAmountText },
+        { trait_type: "From Network", value: fromNetwork },
+        { trait_type: "To Network", value: toNetwork },
+        { trait_type: "Transaction Hash", value: transactionHash },
+        { trait_type: "Session ID", value: sessionId },
+        { trait_type: "Timestamp Left", value: timestampLeft },
+        { trait_type: "Timestamp Right", value: timestampRight }
+      ]
+    };
+    const metadataURI = await uploadToPinata_JSON(metadata);
+
+    /* -----------------------------
+       Mint NFT to user
+    ----------------------------- */
+    const metadataBuffer = Buffer.from(metadataURI);
+    const mintTx = await new TokenMintTransaction()
+      .setTokenId(NFT_TOKEN_ID)
+      .setMetadata([metadataBuffer])
+      .setMaxTransactionFee(new Hbar(2))
+      .execute(HEDERA_CLIENT);
+
+    const receipt = await mintTx.getReceipt(HEDERA_CLIENT);
+    const serials = receipt.serials;
+
+    return res.json({
+      success: true,
+      tokenId: NFT_TOKEN_ID.toString(),
+      serials,
+      metadataURI,
+      mintedTo: userAccountId
+    });
+
+  } catch (err) {
+    console.error("Error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
+
+
+/* ======================================================
+   START SERVER
+====================================================== */
+app.listen(PORT, () =>
+  console.log(`🚀 Server running on port ${PORT}`)
+);
