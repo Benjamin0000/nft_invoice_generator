@@ -309,6 +309,7 @@ app.post("/mint", async (req, res) => {
       tokenId: NFT_TOKEN_ID.toString(),
       serial,
       metadataURI,
+      imageURI, 
       mintedTo: userAccountId,
       transferStatus: transferReceipt.status.toString()
     });
