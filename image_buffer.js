@@ -178,7 +178,7 @@ function makeOverlaySVG({
 
     <text x="310" y="1320" class="big">${esc(bigAmountText)}</text>
 
-    <text x="530" y="1400" class="body">Session ID ${esc(sessionId)}</text>
+    <text x="500" y="1400" class="body">Session ID ${esc(sessionId)}</text>
   </svg>`;
 }
 
