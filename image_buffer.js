@@ -31,7 +31,7 @@ HEDERA_CLIENT.setOperator(
 );
 
 // Your NFT token ID and supply key
-const NFT_TOKEN_ID = TokenId.fromString('0.0.10119645');
+const NFT_TOKEN_ID = TokenId.fromString('0.0.10146137');
 const SUPPLY_KEY = PrivateKey.fromStringECDSA(process.env.HEDERA_OPERATOR_KEY);
 
 

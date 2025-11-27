@@ -1,47 +1,33 @@
 import {
   Client,
   PrivateKey,
+  AccountId, 
   TokenCreateTransaction,
   TokenType,
-  TokenSupplyType,
-  TokenMintTransaction 
+  TokenSupplyType
 } from "@hashgraph/sdk";
+import dotenv from "dotenv";
+dotenv.config();  
 
-const client = Client.forTestnet();
-client.setOperator(process.env.HEDERA_ACCOUNT_ID, process.env.HEDERA_PRIVATE_KEY);
+const client = Client.forMainnet();
 
+const operatorId = AccountId.fromString(process.env.HEDERA_OPERATOR_ID);
+const operatorKey = PrivateKey.fromStringECDSA(process.env.HEDERA_OPERATOR_KEY);
 
-const supplyKey = PrivateKey.generate();
+client.setOperator(operatorId, operatorKey);
 
 const tx = await new TokenCreateTransaction()
-  .setTokenName("Bridge Invoice NFT")
-  .setTokenSymbol("BRIDGE")
-  .setTreasuryAccountId(process.env.HEDERA_ACCOUNT_ID)
+  .setTokenName("Kivon NonFungible Invoice")
+  .setTokenSymbol("KVNI")
+  .setTreasuryAccountId(operatorId)
   .setTokenType(TokenType.NonFungibleUnique)
   .setSupplyType(TokenSupplyType.Finite)
-  .setMaxSupply(100000)       // Or whatever
-  .setSupplyKey(supplyKey)
+  .setMaxSupply(10**18)  // optional
+  .setSupplyKey(operatorKey) // << SAME KEY AS OPERATOR
   .freezeWith(client)
-  .sign(PrivateKey.fromString(process.env.HEDERA_PRIVATE_KEY));
+  .sign(operatorKey);
 
-const submitTx = await tx.execute(client);
-const receipt = await submitTx.getReceipt(client);
-console.log("NFT Token ID:", receipt.tokenId.toString());
+const submit = await tx.execute(client);
+const receipt = await submit.getReceipt(client);
 
-
-
-const cid = "ipfs://QmABC123..."; // your invoice image metadata link
-
-const mintTx = await new TokenMintTransaction()
-  .setTokenId("0.0.xxxxxx")   // token ID from creation
-  .setMetadata([Buffer.from(cid)])    // metadata must be a byte[]
-  .freezeWith(client)
-  .sign(supplyKey);
-
-const mintSubmit = await mintTx.execute(client);
-const mintReceipt = await mintSubmit.getReceipt(client);
-console.log("Minted NFT serial:", mintReceipt.serials[0].toString());
-
-await new TransferTransaction()
-  .addNftTransfer("0.0.xxxxxx", 1, process.env.HEDERA_ACCOUNT_ID, userWallet)
-  .execute(client);
+console.log("Token ID:", receipt.tokenId.toString());
